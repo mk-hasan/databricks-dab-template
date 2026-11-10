@@ -1,0 +1,29 @@
+# Quality checks. blocking=true fails the build; the template repo passes false.
+parameters:
+  - name: blocking
+    type: boolean
+    default: false
+
+steps:
+  - checkout: self
+    fetchDepth: 0
+
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: "$(PYTHON_VERSION)"
+
+  - script: |
+      set +e
+      python -m pip install --upgrade pip
+      pip install pre-commit
+      pre-commit run --all-files --show-diff-on-failure
+      status=$?
+      if [ "$status" -ne 0 ]; then
+        echo "##vso[task.logissue type=warning]Pre-commit reported issues"
+        if [ "${{ parameters.blocking }}" = "True" ] || [ "${{ parameters.blocking }}" = "true" ]; then
+          exit $status
+        fi
+        echo "Pre-commit issues are non-blocking. Forks set blocking to true."
+      fi
+      exit 0
+    displayName: "Run pre-commit"

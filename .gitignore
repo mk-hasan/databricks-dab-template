@@ -1,0 +1,24 @@
+# IDE
+.idea/
+.cursor/
+.vscode/
+
+# Python
+*.pyc
+__pycache__/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Testing
+.pytest_cache/
+.coveragerc
+
+# Databricks
+.databricks/
+.databricks-cli-bin
+output/
+
+# Legacy (removed)
+conf/workflow.yml

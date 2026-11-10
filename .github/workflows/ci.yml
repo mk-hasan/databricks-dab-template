@@ -1,0 +1,122 @@
+# GitHub Actions CI. Same checks as devops-pipeline/azure-pipelines-ci.yml.
+# Pick one CI system. Do not run this and Azure DevOps and Jenkins together.
+#
+# Quality and tests run on GitHub-hosted runners.
+# bundle validate talks to the workspace, so it needs:
+#   - a self-hosted runner whose IP is allowed by the workspace
+#   - OIDC secrets below, one app registration (or three) per environment
+#
+# Repository secrets:
+#   AZURE_TENANT_ID
+#   AZURE_CLIENT_ID_DEV  AZURE_SUBSCRIPTION_ID_DEV
+#   AZURE_CLIENT_ID_TEST AZURE_SUBSCRIPTION_ID_TEST
+#   AZURE_CLIENT_ID_PROD AZURE_SUBSCRIPTION_ID_PROD
+# Federate each app to this repo (environment or branch). See docs/ci_cd_choices.md.
+#
+# Repository variable BLOCKING=true makes quality, tests, and the placeholder
+# check fail the build. Leave it unset in this template.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [dev, stage, main]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PYTHON_VERSION: "3.10"
+  DATABRICKS_CLI_VERSION: "0.295.1"
+  BLOCKING: ${{ vars.BLOCKING || 'false' }}
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: pre-commit
+        run: |
+          set +e
+          python -m pip install --upgrade pip
+          pip install pre-commit
+          pre-commit run --all-files --show-diff-on-failure
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "Pre-commit reported issues"
+            if [ "${BLOCKING}" = "true" ]; then
+              exit "$status"
+            fi
+            echo "Non-blocking. Set repository variable BLOCKING=true in a fork."
+          fi
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: pip-audit
+        run: |
+          set +e
+          python -m pip install --upgrade pip
+          pip install pip-audit
+          pip install .
+          pip freeze | pip-audit -r /dev/stdin --format columns
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "pip-audit reported findings"
+            if [ "${BLOCKING}" = "true" ]; then
+              exit "$status"
+            fi
+          fi
+      - name: Unit tests
+        run: bash devops-pipeline/scripts/ci_test_integrations.sh
+      - name: Placeholder and version check
+        run: bash devops-pipeline/scripts/check_fork_config.sh
+
+  validate-skipped:
+    if: secrets.AZURE_CLIENT_ID_DEV == ''
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "bundle validate skipped."
+          echo "Set the AZURE_* secrets and a self-hosted runner. See docs/ci_cd_choices.md."
+
+  validate:
+    needs: [quality, tests]
+    if: secrets.AZURE_CLIENT_ID_DEV != '' && secrets.AZURE_CLIENT_ID_TEST != '' && secrets.AZURE_CLIENT_ID_PROD != ''
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Databricks CLI
+        run: bash devops-pipeline/scripts/install_databricks_cli.sh
+      - name: Validate dev
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID_DEV }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}
+      - run: TARGET=dev bash devops-pipeline/scripts/run_bundle.sh validate
+      - name: Validate test
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID_TEST }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_TEST }}
+      - run: TARGET=test bash devops-pipeline/scripts/run_bundle.sh validate
+      - name: Validate prod
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID_PROD }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}
+      - run: TARGET=prod bash devops-pipeline/scripts/run_bundle.sh validate

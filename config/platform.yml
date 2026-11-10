@@ -1,0 +1,58 @@
+# Platform-owned. On a template upgrade, overwrite this file from the tag.
+# Organization workspaces: hosts, catalogs, compute policy IDs, deploy groups.
+# Replace every placeholder, then treat this file as platform-owned.
+# Team values live in config/project.yml.
+
+variables:
+  catalog:
+    description: Unity Catalog for this target. Set per target below.
+  deploy_group:
+    description: Databricks group of CD service principals for this target. Set per target below.
+    default: ""
+  deploy_sp:
+    description: Optional single Azure AD application ID. Prefer deploy_group when many SPs deploy.
+    default: ""
+  run_as_sp:
+    description: Service principal application ID used as job run_as. Leave empty to run as the deployer.
+    default: ""
+  run_as_user:
+    description: User email used as job run_as when no service principal is available.
+    default: ""
+  job_compute_policy_id:
+    description: |
+      Single-node job compute policy ID (F4, auto:latest-lts).
+      Policy IDs are workspace-specific and set per target below.
+    default: ""
+
+targets:
+  # Path shape: /Workspace/Teams/<team>/<bundle>/<env>
+  # dev stays the default target so local bundle commands work without -t.
+  # Non-bundle CLI ignores DATABRICKS_HOST in a DAB folder — CD and ACL use --target.
+  # Do not use: databricks --host ... (unsupported on CLI 0.295.x).
+  dev:
+    default: true
+    workspace:
+      host: https://adb-YOUR-DEV-WORKSPACE.azuredatabricks.net
+      root_path: /Workspace/Teams/${var.team_name}/${bundle.name}/dev
+    variables:
+      catalog: catalog_dev
+      job_compute_policy_id: "YOUR-DEV-POLICY-ID"
+      deploy_group: dbx-deploy-dev
+
+  test:
+    workspace:
+      host: https://adb-YOUR-TEST-WORKSPACE.azuredatabricks.net
+      root_path: /Workspace/Teams/${var.team_name}/${bundle.name}/test
+    variables:
+      catalog: catalog_test
+      job_compute_policy_id: "YOUR-TEST-POLICY-ID"
+      deploy_group: dbx-deploy-test
+
+  prod:
+    workspace:
+      host: https://adb-YOUR-PROD-WORKSPACE.azuredatabricks.net
+      root_path: /Workspace/Teams/${var.team_name}/${bundle.name}/prod
+    variables:
+      catalog: catalog_prod
+      job_compute_policy_id: "YOUR-PROD-POLICY-ID"
+      deploy_group: dbx-deploy-prod

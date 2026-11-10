@@ -1,0 +1,135 @@
+// Jenkins CI/CD. Same checks and branch map as the Azure DevOps pipelines.
+// Create a multibranch pipeline that points at this file.
+// Install the Azure Credentials Binding plugin and create service-principal
+// credentials with these IDs: azure-sp-dev, azure-sp-test, azure-sp-prod.
+// Validate and deploy run on agent label "your-self-hosted-pool"
+// (an agent whose IP the workspace allows).
+// Prod waits for a manual approval. See docs/ci_cd_choices.md.
+
+pipeline {
+    agent none
+
+    environment {
+        DATABRICKS_CLI_VERSION = '0.295.1'
+        BLOCKING = 'false'
+    }
+
+    stages {
+        stage('Quality') {
+            agent any
+            steps {
+                sh '''
+                    set +e
+                    mkdir -p "$HOME/.local/bin"
+                    if ! command -v python >/dev/null 2>&1; then
+                        ln -sfn "$(command -v python3)" "$HOME/.local/bin/python"
+                    fi
+                    export PATH="$HOME/.local/bin:$PATH"
+                    python3 -m pip install --user --upgrade pip
+                    python3 -m pip install --user pre-commit
+                    python3 -m pre_commit run --all-files --show-diff-on-failure
+                    status=$?
+                    if [ "$status" -ne 0 ] && [ "$BLOCKING" = "true" ]; then
+                        exit "$status"
+                    fi
+                    exit 0
+                '''
+            }
+        }
+
+        stage('Tests') {
+            agent any
+            steps {
+                sh '''
+                    set +e
+                    mkdir -p "$HOME/.local/bin"
+                    if ! command -v python >/dev/null 2>&1; then
+                        ln -sfn "$(command -v python3)" "$HOME/.local/bin/python"
+                    fi
+                    export PATH="$HOME/.local/bin:$PATH"
+                    python3 -m pip install --user --upgrade pip
+                    python3 -m pip install --user pip-audit
+                    python3 -m pip install --user .
+                    python3 -m pip freeze | python3 -m pip_audit -r /dev/stdin --format columns
+                    status=$?
+                    if [ "$status" -ne 0 ] && [ "$BLOCKING" = "true" ]; then
+                        exit "$status"
+                    fi
+                    bash devops-pipeline/scripts/ci_test_integrations.sh
+                    bash devops-pipeline/scripts/check_fork_config.sh
+                '''
+            }
+        }
+
+        stage('Validate') {
+            agent { label 'your-self-hosted-pool' }
+            steps {
+                script {
+                    def targets = [
+                        [target: 'dev',  credential: 'azure-sp-dev'],
+                        [target: 'test', credential: 'azure-sp-test'],
+                        [target: 'prod', credential: 'azure-sp-prod']
+                    ]
+                    for (item in targets) {
+                        withCredentials([azureServicePrincipal(item.credential)]) {
+                            sh """
+                                set -euo pipefail
+                                az login --service-principal \\
+                                  -u "\$AZURE_CLIENT_ID" \\
+                                  -p "\$AZURE_CLIENT_SECRET" \\
+                                  -t "\$AZURE_TENANT_ID"
+                                az account set --subscription "\$AZURE_SUBSCRIPTION_ID"
+                                export DATABRICKS_CLI_VERSION="\$DATABRICKS_CLI_VERSION"
+                                bash devops-pipeline/scripts/install_databricks_cli.sh
+                                export PATH="\$(cat "\$WORKSPACE/.databricks-cli-bin"):\$PATH"
+                                TARGET=${item.target} bash devops-pipeline/scripts/run_bundle.sh validate
+                            """
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Approve prod') {
+            when {
+                branch 'main'
+                not { changeRequest() }
+            }
+            steps {
+                input message: 'Deploy this build to prod?', ok: 'Deploy'
+            }
+        }
+
+        stage('Deploy') {
+            when {
+                anyOf { branch 'dev'; branch 'stage'; branch 'main' }
+                not { changeRequest() }
+            }
+            agent { label 'your-self-hosted-pool' }
+            steps {
+                script {
+                    def plan = [
+                        dev  : [target: 'dev',  credential: 'azure-sp-dev'],
+                        stage: [target: 'test', credential: 'azure-sp-test'],
+                        main : [target: 'prod', credential: 'azure-sp-prod']
+                    ]
+                    def item = plan[env.BRANCH_NAME]
+                    withCredentials([azureServicePrincipal(item.credential)]) {
+                        sh """
+                            set -euo pipefail
+                            az login --service-principal \\
+                              -u "\$AZURE_CLIENT_ID" \\
+                              -p "\$AZURE_CLIENT_SECRET" \\
+                              -t "\$AZURE_TENANT_ID"
+                            az account set --subscription "\$AZURE_SUBSCRIPTION_ID"
+                            export DATABRICKS_CLI_VERSION="\$DATABRICKS_CLI_VERSION"
+                            bash devops-pipeline/scripts/install_databricks_cli.sh
+                            export PATH="\$(cat "\$WORKSPACE/.databricks-cli-bin"):\$PATH"
+                            TARGET=${item.target} bash devops-pipeline/scripts/run_bundle.sh deploy
+                        """
+                    }
+                }
+            }
+        }
+    }
+}

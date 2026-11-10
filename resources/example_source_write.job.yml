@@ -1,0 +1,39 @@
+# ============================================================================
+# Example Source Write (Reverse-ETL) — sample orders
+# ============================================================================
+# Reads gold daily KPIs and writes an outbound table (simulated push).
+# Run after example_source_read has succeeded.
+# Permissions and tags come from databricks.yml. Do not set them here.
+# ============================================================================
+
+resources:
+  jobs:
+    example_source_write:
+      name: ${bundle.target}-example-source-write
+      description: Simulate reverse-ETL from gold into an outbound table.
+      timeout_seconds: 3600
+
+      queue:
+        enabled: true
+
+      parameters:
+        - name: env
+          default: ${bundle.target}
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+
+      job_clusters:
+        - job_cluster_key: main_cluster
+          new_cluster: ${var.default_job_cluster}
+
+      tasks:
+        - task_key: push_to_source
+          job_cluster_key: main_cluster
+          notebook_task:
+            notebook_path: ../src/example_source/write/push_to_source.ipynb
+            base_parameters:
+              env: "{{job.parameters.env}}"
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"

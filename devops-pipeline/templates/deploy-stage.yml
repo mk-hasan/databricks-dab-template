@@ -1,0 +1,80 @@
+# Template-owned. Forks overwrite this file from the template tag.
+# One deploy stage, called once per environment from azure-pipelines-cd.yml.
+# Template path: devops-pipeline/templates/deploy-stage.yml
+# Prod approval is an Azure DevOps check on the environment named below, not a step in this file.
+parameters:
+  - name: stageName
+    type: string
+  - name: displayName
+    type: string
+  - name: branch
+    type: string
+  - name: bundleTarget
+    type: string
+  - name: azureServiceConnection
+    type: string
+  - name: environmentName
+    type: string
+
+stages:
+  - stage: ${{ parameters.stageName }}
+    displayName: ${{ parameters.displayName }}
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/${{ parameters.branch }}'))
+    jobs:
+      - deployment: Deploy_${{ parameters.stageName }}
+        displayName: ${{ parameters.displayName }}
+        environment: ${{ parameters.environmentName }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: DownloadPipelineArtifact@2
+                  inputs:
+                    artifact: bundle-repo
+                    path: "$(Pipeline.Workspace)/repo"
+
+                - bash: |
+                    set -euo pipefail
+                    mkdir -p "$(Pipeline.Workspace)/src"
+                    tar -xzf "$(Pipeline.Workspace)/repo/repo.tar.gz" -C "$(Pipeline.Workspace)/src"
+                  displayName: Extract Repo
+
+                - bash: |
+                    set -euo pipefail
+                    bash "$(Pipeline.Workspace)/src/devops-pipeline/scripts/install_databricks_cli.sh"
+                  displayName: Install Databricks CLI
+                  env:
+                    DATABRICKS_CLI_VERSION: $(DATABRICKS_CLI_VERSION)
+
+                - task: AzureCLI@2
+                  displayName: Deploy Bundle ${{ parameters.bundleTarget }}
+                  inputs:
+                    azureSubscription: ${{ parameters.azureServiceConnection }}
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    workingDirectory: $(Pipeline.Workspace)/src
+                    inlineScript: |
+                      set -euo pipefail
+                      chmod +x devops-pipeline/scripts/read_bundle_yml.sh
+                      chmod +x devops-pipeline/scripts/ensure_team_folder_acl.sh
+
+                      export DATABRICKS_HOST="$(BUNDLE_ROOT="$(pwd)" BUNDLE_TARGET=${{ parameters.bundleTarget }} \
+                        bash devops-pipeline/scripts/read_bundle_yml.sh host)"
+                      export DATABRICKS_AUTH_TYPE=azure-cli
+                      echo "DATABRICKS_HOST=${DATABRICKS_HOST} (target=${{ parameters.bundleTarget }})"
+
+                      # Non-bundle CLI ignores DATABRICKS_HOST in a DAB folder — use --target (no --host on 0.295.x).
+                      databricks --target ${{ parameters.bundleTarget }} current-user me
+
+                      python3 -m pip install --upgrade build setuptools wheel
+
+                      BUNDLE_ROOT="$(pwd)" \
+                        BUNDLE_TARGET=${{ parameters.bundleTarget }} \
+                        TEAM_NAME="${TEAM_NAME:-}" \
+                        TEAM_GROUP="${TEAM_GROUP:-}" \
+                        DEPLOY_SP="${DEPLOY_SP:-}" \
+                        bash devops-pipeline/scripts/ensure_team_folder_acl.sh
+
+                      databricks bundle validate -t ${{ parameters.bundleTarget }}
+                      databricks bundle deploy -t ${{ parameters.bundleTarget }}

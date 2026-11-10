@@ -1,0 +1,38 @@
+# User-owned. A template upgrade must not overwrite this file.
+# Forks: replace every value below, then set blocking to true in
+# devops-pipeline/azure-pipelines-ci.yml.
+
+variables:
+  team_name:
+    description: Team folder under /Workspace/Teams (one per team / usecase owner).
+    default: your-team
+  team_group:
+    description: |
+      Databricks group for people on this team. Not "users".
+      The template project uses your-team-group so bundle permissions can deploy.
+      Forks replace this with their own group before the first deploy.
+    default: your-team-group
+  cost_center_id:
+    description: Cost center charged for this project's jobs, pipelines, and clusters.
+    default: "YOUR-COST-CENTER-ID"
+  usecase:
+    description: Required tag usecase on jobs, pipelines, and clusters. Usually the same as bundle.name.
+    default: usecase_template
+  purpose:
+    description: |
+      FinOps purpose tag. The template project keeps "template".
+      Forks replace it so their spend is not reported as the template.
+    default: template
+  schema:
+    description: Unity Catalog schema for this target. Set per target below.
+
+targets:
+  dev:
+    variables:
+      schema: template
+  test:
+    variables:
+      schema: template
+  prod:
+    variables:
+      schema: template

@@ -1,0 +1,58 @@
+# User-owned values in this file: the three service-connection names.
+# Deploy logic lives in templates/ (overwrite that folder from the template tag).
+name: Example Continuous Deployment
+
+trigger:
+  branches:
+    include:
+      - dev
+      - stage
+      - main
+
+pool:
+  name: your-self-hosted-pool
+
+variables:
+  - name: DATABRICKS_CLI_VERSION
+    value: "0.295.1"
+
+  # Workspace hosts: set per target in config/platform.yml
+  # Forks: change these to the Azure RM service connection names in YOUR ADO project
+  - name: azureServiceConnectionDev
+    value: your-azure-rm-connection-dev
+
+  - name: azureServiceConnectionTest
+    value: your-azure-rm-connection-test
+
+  - name: azureServiceConnectionProd
+    value: your-azure-rm-connection-prod
+
+stages:
+  - template: templates/build-stage.yml
+
+  - template: templates/deploy-stage.yml
+    parameters:
+      stageName: Deploy_Dev
+      displayName: Deploy DEV
+      branch: dev
+      bundleTarget: dev
+      azureServiceConnection: $(azureServiceConnectionDev)
+      environmentName: dev
+
+  - template: templates/deploy-stage.yml
+    parameters:
+      stageName: Deploy_Stage
+      displayName: Deploy STAGE
+      branch: stage
+      bundleTarget: test
+      azureServiceConnection: $(azureServiceConnectionTest)
+      environmentName: test
+
+  - template: templates/deploy-stage.yml
+    parameters:
+      stageName: Deploy_Prod
+      displayName: Deploy PROD
+      branch: main
+      bundleTarget: prod
+      azureServiceConnection: $(azureServiceConnectionProd)
+      environmentName: prod

@@ -1,0 +1,66 @@
+# Mixed file. Forks change bundle.name only.
+# Platform values: config/platform.yml (overwrite on upgrade).
+# Team values: config/project.yml (never overwrite).
+# Template version is also in VERSION. Keep the two identical.
+
+bundle:
+  name: usecase_template
+  engine: direct
+
+include:
+  - config/platform.yml
+  - config/project.yml
+  # Jobs and pipelines. The sample orders example ships here, same place a real usecase uses.
+  # Add <your_source>_read.job.yml (and write / pipeline) next to it.
+  - resources/*.yml
+
+sync:
+  paths:
+    - ./src
+
+artifacts:
+  python_artifact:
+    type: whl
+    path: .
+    build: "python3 -m pip install --upgrade build setuptools wheel && python3 -m build --wheel"
+
+# Applied to every job and pipeline that does not set its own permissions.
+# A resource-level permissions block replaces this list, so job YAML must not set one.
+# CAN_MANAGE is valid on both jobs and DLT pipelines, and it includes run.
+permissions:
+  - level: CAN_MANAGE
+    group_name: ${var.deploy_group}
+  - level: CAN_MANAGE
+    group_name: ${var.team_group}
+
+presets:
+  tags:
+    deployed_by: dab
+    template_version: "1.0.0"
+    purpose: ${var.purpose}
+    cost_center_id: ${var.cost_center_id}
+    usecase: ${var.usecase}
+
+variables:
+  default_job_cluster:
+    description: |
+      Shared classic job cluster. Jobs reference it by setting new_cluster to this variable.
+      spark_version comes from the compute policy (auto:latest-lts).
+      kind CLASSIC_PREVIEW is required when that policy sets is_single_node.
+    type: complex
+    default:
+      policy_id: ${var.job_compute_policy_id}
+      apply_policy_default_values: true
+      kind: CLASSIC_PREVIEW
+      custom_tags:
+        cost_center_id: ${var.cost_center_id}
+        usecase: ${var.usecase}
+      azure_attributes:
+        availability: ON_DEMAND_AZURE
+      data_security_mode: SINGLE_USER
+
+# Jobs run as whoever deploys (the CD service principal, or you locally).
+# Do not set run_as to another user unless the deployer is a workspace admin.
+# run_as:
+#   service_principal_name: ${var.run_as_sp}
+#   user_name: ${var.run_as_user}

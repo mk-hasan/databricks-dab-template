@@ -1,0 +1,139 @@
+# ============================================================================
+# Continuous Integration — Single-bundle DAB template
+# ============================================================================
+# Point the Azure DevOps pipeline at: devops-pipeline/azure-pipelines-ci.yml
+#
+# blocking: false in this template repo, so the demo's placeholders stay valid.
+# Forks set blocking to true. Quality, tests, and the placeholder check then fail the build.
+# Bundle validate always runs (pinned CLI) for dev, test, and prod.
+# ============================================================================
+
+name: Databricks Usecase Template CI
+
+trigger:
+  branches:
+    include: [dev, stage, main]
+
+pr:
+  branches:
+    include: [dev, stage, main]
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  PYTHON_VERSION: "3.10"
+  DATABRICKS_CLI_VERSION: "0.295.1"
+  # Forks: set this to true.
+  blocking: false
+  # Same Azure RM connection names as azure-pipelines-cd.yml. Forks change both.
+  azureServiceConnectionDev: your-azure-rm-connection-dev
+  azureServiceConnectionTest: your-azure-rm-connection-test
+  azureServiceConnectionProd: your-azure-rm-connection-prod
+
+stages:
+  - stage: Quality
+    displayName: "Static Code Quality"
+    jobs:
+      - job: QualityChecks
+        displayName: "Quality checks"
+        steps:
+          - template: templates/steps-quality.yml
+            parameters:
+              blocking: ${{ variables.blocking }}
+
+  - stage: Checks
+    displayName: "Security scan, tests, bundle validate"
+    dependsOn: Quality
+    jobs:
+      - job: BundleChecks
+        displayName: "Bundle checks"
+        steps:
+          - checkout: self
+
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: "$(PYTHON_VERSION)"
+
+          - template: templates/steps-security-scan-integration.yml
+            parameters:
+              blocking: ${{ variables.blocking }}
+
+          - bash: bash devops-pipeline/scripts/ci_test_integrations.sh
+            displayName: "Test each package under src/"
+            env:
+              BLOCKING: ${{ variables.blocking }}
+
+          - bash: bash devops-pipeline/scripts/check_fork_config.sh
+            displayName: "Placeholder and version check"
+            env:
+              BLOCKING: ${{ variables.blocking }}
+
+      # ubuntu-latest is blocked by the workspace IP access list.
+      # Same pool and the same workload-identity service connections as CD.
+      - job: BundleValidate
+        displayName: "bundle validate"
+        dependsOn: BundleChecks
+        pool:
+          name: your-self-hosted-pool
+        steps:
+          - checkout: self
+
+          - bash: |
+              set -euo pipefail
+              bash devops-pipeline/scripts/install_databricks_cli.sh
+            displayName: "Install Databricks CLI"
+            env:
+              DATABRICKS_CLI_VERSION: $(DATABRICKS_CLI_VERSION)
+
+          # validate talks to the workspace (CLI 0.295). One login per target.
+          - task: AzureCLI@2
+            displayName: "bundle validate dev"
+            inputs:
+              azureSubscription: $(azureServiceConnectionDev)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                chmod +x devops-pipeline/scripts/read_bundle_yml.sh
+                export DATABRICKS_HOST="$(BUNDLE_ROOT="$(pwd)" BUNDLE_TARGET=dev \
+                  bash devops-pipeline/scripts/read_bundle_yml.sh host)"
+                export DATABRICKS_AUTH_TYPE=azure-cli
+                echo "DATABRICKS_HOST=${DATABRICKS_HOST} (target=dev)"
+                az account show --query "{subscription:name, user:user}" -o json
+                databricks --target dev current-user me
+                databricks bundle validate -t dev
+
+          - task: AzureCLI@2
+            displayName: "bundle validate test"
+            inputs:
+              azureSubscription: $(azureServiceConnectionTest)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                chmod +x devops-pipeline/scripts/read_bundle_yml.sh
+                export DATABRICKS_HOST="$(BUNDLE_ROOT="$(pwd)" BUNDLE_TARGET=test \
+                  bash devops-pipeline/scripts/read_bundle_yml.sh host)"
+                export DATABRICKS_AUTH_TYPE=azure-cli
+                echo "DATABRICKS_HOST=${DATABRICKS_HOST} (target=test)"
+                az account show --query "{subscription:name, user:user}" -o json
+                databricks --target test current-user me
+                databricks bundle validate -t test
+
+          - task: AzureCLI@2
+            displayName: "bundle validate prod"
+            inputs:
+              azureSubscription: $(azureServiceConnectionProd)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                chmod +x devops-pipeline/scripts/read_bundle_yml.sh
+                export DATABRICKS_HOST="$(BUNDLE_ROOT="$(pwd)" BUNDLE_TARGET=prod \
+                  bash devops-pipeline/scripts/read_bundle_yml.sh host)"
+                export DATABRICKS_AUTH_TYPE=azure-cli
+                echo "DATABRICKS_HOST=${DATABRICKS_HOST} (target=prod)"
+                az account show --query "{subscription:name, user:user}" -o json
+                databricks --target prod current-user me
+                databricks bundle validate -t prod

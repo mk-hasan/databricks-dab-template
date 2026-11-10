@@ -1,0 +1,37 @@
+# ============================================================================
+# Example Source Read — DLT pipeline (sample orders)
+# ============================================================================
+# Read-side ELT using declarative DLT (alternative to bronze/silver/gold jobs).
+# Source: src/example_source/read/dlt/
+# Permissions and tags come from databricks.yml. Do not set them here.
+# ============================================================================
+
+resources:
+  pipelines:
+    example_source_read_dlt:
+      name: ${bundle.target}-example-source-read-dlt
+
+      catalog: ${var.catalog}
+      target: ${var.schema}
+
+      libraries:
+        - glob:
+            include: ../src/example_source/read/dlt/**
+
+      root_path: ../src/example_source/read/dlt
+
+      serverless: true
+      photon: true
+      continuous: false
+      development: true
+      channel: CURRENT
+
+      configuration:
+        pipeline_env: ${bundle.target}
+
+targets:
+  prod:
+    resources:
+      pipelines:
+        example_source_read_dlt:
+          development: false

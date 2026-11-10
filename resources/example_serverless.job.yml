@@ -1,0 +1,65 @@
+# ============================================================================
+# Example Source Read — same notebooks, serverless compute
+# ============================================================================
+# Same bronze → silver → gold code as example_source_read.job.yml.
+# Only difference: serverless environment instead of a job cluster.
+# Permissions and tags come from databricks.yml. Do not set them here.
+# Serverless installs the bundle wheel from the environment, not from a task library.
+# ============================================================================
+
+resources:
+  jobs:
+    example_serverless:
+      name: ${bundle.target}-example-source-read-serverless
+      description: Same read ELT as example_source_read, on serverless compute.
+      timeout_seconds: 3600
+
+      queue:
+        enabled: true
+
+      parameters:
+        - name: env
+          default: ${bundle.target}
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+
+      tasks:
+        - task_key: bronze_extract
+          notebook_task:
+            notebook_path: ../src/example_source/read/bronze/01_extract.ipynb
+            base_parameters:
+              env: "{{job.parameters.env}}"
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+          environment_key: serverless_env
+
+        - task_key: silver_transform
+          depends_on:
+            - task_key: bronze_extract
+          notebook_task:
+            notebook_path: ../src/example_source/read/silver/02_transform.ipynb
+            base_parameters:
+              env: "{{job.parameters.env}}"
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+          environment_key: serverless_env
+
+        - task_key: gold_load
+          depends_on:
+            - task_key: silver_transform
+          notebook_task:
+            notebook_path: ../src/example_source/read/gold/03_load.ipynb
+            base_parameters:
+              env: "{{job.parameters.env}}"
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+          environment_key: serverless_env
+
+      environments:
+        - environment_key: serverless_env
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl

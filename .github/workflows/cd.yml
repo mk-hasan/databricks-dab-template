@@ -1,0 +1,48 @@
+# GitHub Actions CD. Same branch map as devops-pipeline/azure-pipelines-cd.yml.
+#   dev   -> Databricks dev
+#   stage -> Databricks test
+#   main  -> Databricks prod
+#
+# Create GitHub Environments named dev, test, and prod.
+# Put these secrets on each environment (prod should require a reviewer):
+#   AZURE_CLIENT_ID
+#   AZURE_TENANT_ID
+#   AZURE_SUBSCRIPTION_ID
+# Federate the app registration to that GitHub Environment.
+# The runner must be allowed by the workspace IP access list.
+# See docs/ci_cd_choices.md.
+
+name: CD
+
+on:
+  push:
+    branches: [dev, stage, main]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  DATABRICKS_CLI_VERSION: "0.295.1"
+
+jobs:
+  deploy:
+    # Environment secrets are not visible here. Set CD_ENABLED=true after
+    # the dev, test, and prod environments have their Azure secrets.
+    if: vars.CD_ENABLED == 'true'
+    runs-on: self-hosted
+    environment: ${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'stage' && 'test' || 'dev' }}
+    env:
+      BUNDLE_TARGET: ${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'stage' && 'test' || 'dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Databricks CLI
+        run: bash devops-pipeline/scripts/install_databricks_cli.sh
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Deploy
+        run: TARGET="${BUNDLE_TARGET}" bash devops-pipeline/scripts/run_bundle.sh deploy

@@ -1,0 +1,27 @@
+# pip-audit. blocking=true fails the build; the template repo passes false.
+parameters:
+  - name: blocking
+    type: boolean
+    default: false
+
+steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: "$(PYTHON_VERSION)"
+
+  - script: |
+      set +e
+      python -m pip install --upgrade pip
+      pip install pip-audit
+      pip install .
+      pip freeze | pip-audit -r /dev/stdin --format columns
+      status=$?
+      if [ "$status" -ne 0 ]; then
+        echo "##vso[task.logissue type=warning]pip-audit reported findings"
+        if [ "${{ parameters.blocking }}" = "True" ] || [ "${{ parameters.blocking }}" = "true" ]; then
+          exit $status
+        fi
+        echo "pip-audit findings are non-blocking. Forks set blocking to true."
+      fi
+      exit 0
+    displayName: "pip-audit"

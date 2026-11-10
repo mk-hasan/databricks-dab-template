@@ -1,0 +1,24 @@
+# Template-owned. Forks overwrite this file from the template tag.
+stages:
+  - stage: Build
+    displayName: Build
+    jobs:
+      - job: BuildRepo
+        steps:
+          - checkout: self
+            clean: true
+
+          - task: ArchiveFiles@2
+            displayName: Archive repo
+            inputs:
+              rootFolderOrFile: "$(Build.SourcesDirectory)"
+              includeRootFolder: false
+              archiveType: tar
+              tarCompression: gz
+              archiveFile: "$(Build.ArtifactStagingDirectory)/repo.tar.gz"
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish artifact
+            inputs:
+              targetPath: "$(Build.ArtifactStagingDirectory)/repo.tar.gz"
+              artifact: bundle-repo

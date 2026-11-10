@@ -1,0 +1,76 @@
+# ============================================================================
+# Example Source Read (Medallion) — sample orders
+# ============================================================================
+# Self-contained: generates sample orders, no API keys.
+# bronze → silver → gold tables in {catalog}.{schema}
+# Permissions and tags come from databricks.yml. Do not set them here.
+# The bundle artifact in databricks.yml builds dist/*.whl on deploy.
+# Attach that wheel on every task that imports the package. A shared
+# job cluster does not share task libraries.
+# ============================================================================
+
+resources:
+  jobs:
+    example_source_read:
+      name: ${bundle.target}-example-source-read
+      description: Ingest sample orders through bronze, silver, and gold.
+      timeout_seconds: 3600
+
+      queue:
+        enabled: true
+
+      parameters:
+        - name: env
+          default: ${bundle.target}
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+
+      job_clusters:
+        - job_cluster_key: main_cluster
+          new_cluster: ${var.default_job_cluster}
+
+      tasks:
+        - task_key: bronze_extract
+          job_cluster_key: main_cluster
+          notebook_task:
+            notebook_path: ../src/example_source/read/bronze/01_extract.ipynb
+            base_parameters:
+              env: "{{job.parameters.env}}"
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+          libraries:
+            - whl: ../dist/*.whl
+
+        - task_key: silver_transform
+          depends_on:
+            - task_key: bronze_extract
+          job_cluster_key: main_cluster
+          notebook_task:
+            notebook_path: ../src/example_source/read/silver/02_transform.ipynb
+            base_parameters:
+              env: "{{job.parameters.env}}"
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+
+        - task_key: gold_load
+          depends_on:
+            - task_key: silver_transform
+          job_cluster_key: main_cluster
+          notebook_task:
+            notebook_path: ../src/example_source/read/gold/03_load.ipynb
+            base_parameters:
+              env: "{{job.parameters.env}}"
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+
+targets:
+  prod:
+    resources:
+      jobs:
+        example_source_read:
+          schedule:
+            quartz_cron_expression: "0 0 5 * * ?"
+            timezone_id: UTC
+            pause_status: PAUSED

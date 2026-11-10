@@ -1,0 +1,1 @@
+"""Single-bundle source package."""
